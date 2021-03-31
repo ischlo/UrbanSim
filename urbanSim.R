@@ -1,5 +1,5 @@
 #### LIBS ####
-
+library(sp)
 library(sf)
 require(sp)
 library(tmap)
@@ -54,7 +54,7 @@ Stations <- Stations %>% group_by(edgeID) %>%
 
 Stations <-  Stations %>%
   distinct(name, .keep_all = TRUE) %>%
-  select(-c(edgeID, start_end)) %>%
+  select(-c(edgeID)) %>%
   st_as_sf(coords = c('X', 'Y')) %>%
   st_set_crs(projection)
 
@@ -64,5 +64,5 @@ qtm(Stations)
 
 qtm(tube)
 
-l <- leaflet(Stations)  %>% addCircles(.,radius = 10, popup = ~name)
+l <- leaflet(Stations) %>% addCircles(.,radius = 10, popup = ~name)
 l
