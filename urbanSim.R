@@ -14,6 +14,7 @@ library(vroom)
 library(leaflet)
 library(tibble)
 library(dplyr)
+library(maptools)
 
 
 #### Reading DATA ####
@@ -28,13 +29,15 @@ tmap_mode("view")
 
 qtm(tube)
 
-tube_graph <- tube %>% as(.,"Spatial")  %>% SpatialLinesNetwork()
+#### Creating graph and spatil lines from tube ####
 
-tube_graph
+tube_graph <- tube %>% as(.,"Spatial")  %>% SpatialLinesNetwork() %>% .@g
+
+tube_sl <- tube %>% as(.,"Spatial")  %>% SpatialLinesNetwork() %>% .@sl %>% st_as_sf()
 
 warnings()
 
-#### Manipulating the data #### 
+#### Assembling stations data set #### 
 
 Stations <- tube %>% st_coordinates() %>%
   as_tibble() %>%
@@ -58,11 +61,130 @@ Stations <-  Stations %>%
   st_as_sf(coords = c('X', 'Y')) %>%
   st_set_crs(projection)
 
-Stations
+Stations$b <- tube_b
 
 qtm(Stations)
 
 qtm(tube)
 
-l <- leaflet(Stations) %>% addCircles(.,radius = 10, popup = ~name)
+l <- leaflet(Stations) %>% addTiles() %>% addCircleMarkers(.,radius = 3, popup = ~name,color = "red", group = "Stations")
 l
+
+#### Centrality measures  ####
+
+tube_eb <- edge_betweenness(tube_graph, directed = F, weights = tube_sl$length)
+
+tube_eb
+
+
+tube_b <- betweenness(tube_graph, directed = F, weights = tube_sl$length, normalized = T)
+
+tube_deg <- degree(tube_graph,mode = "all", loops = F, normalized = F)
+
+tube_degdistr <- degree.distribution(tube_graph,cumulative = F)
+
+hist(tube_deg)
+
+tube_sl$eb <- tube_eb
+
+qtm(tube_sl)
+
+#### Mapping #### 
+
+tube_statcoords <-  tube_sl %>% st_coordinates() %>% as_tibble() %>% 
+  rename(edgeID = L1) %>%
+  mutate(start_end = rep(c('start', 'end'), times = n()/2))
+
+# 
+# testl <- leaflet() %>% addTiles()
+# 
+# for (i in 1:(nrow(tube_statcoords)/2)) {
+#   testl <- testl %>% addPolylines(tube_statcoords, lat = tube_statcoords$Y[(2*i-1):(2*i)],lng = tube_statcoords$X[(2*i-1):(2*i)])
+# }
+# testl
+
+hist(tube_b)
+
+Stations$lvl <- cut(Stations$b
+            ,breaks = unlist(makeBins(Stations$b)[1])
+            ,labels = unlist(makeBins(Stations$b)[2]) 
+            ,right = F
+            ,include.lowest = T
+            ,dig.lab = 5
+)
+
+beatCol <- colorFactor(palette = 'plasma', Stations$lvl)
+
+beatCol(Stations$lvl)
+
+tube_sl$lvl <- cut(tube_eb
+                   ,breaks = unlist(makeBins(tube_eb)[1])
+                   ,labels = unlist(makeBins(tube_eb)[2]) 
+                   ,right = F
+                   ,include.lowest = T
+                   ,dig.lab = 5
+)
+
+ebCol <- colorFactor(palette = "plasma"
+                     ,tube_sl$lvl)
+
+l <- leaflet(Stations) %>% 
+  addTiles() %>% 
+  addCircleMarkers(radius = 1
+                   ,popup = ~name
+                   ,opacity = 1
+                   ,color = beatCol(Stations$lvl)
+                   ,group = "Stations") %>% 
+  # Layers control
+  addLayersControl(
+    baseGroups = "OSM",
+    overlayGroups = c("Stations", "Links"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) 
+
+l
+
+for (i in 1:(nrow(tube_statcoords)/2)) {
+  l <- l %>% addPolylines(data = tube_statcoords
+                 ,lng = tube_statcoords$X[(2*i-1):(2*i)]
+                 ,lat = tube_statcoords$Y[(2*i-1):(2*i)]
+                 ,group = "Links"
+                 ,popup = tube_sl$eb[i]
+                 ,weight = 3
+                 ,opacity = .7
+                 ,color = ebCol(tube_sl$lvl[i]))
+}
+
+l <- l %>% addLegend('bottomright', pal = beatCol, values = Stations$lvl,
+                     title = 'Betweenness score of <br>tube stations (normalized)',
+                     opacity = 1) %>% addLegend('bottomleft', pal = ebCol, values = tube_sl$lvl,
+                                                title = 'Edge Betweenness score of lines',
+                                                opacity = 1) 
+
+l
+
+#### Functions #### 
+
+makeBins <- function(dat, n = 5) {
+  min <-  min(dat)
+  max <- max(dat)
+  step <- (max-min)/(n-1)
+  bins <- min
+  lab <- as.character(min)
+  for (i in 1:(n-2)) {
+    bins <- c(bins,min + i*step)
+    lab <- c(lab,as.character(min + i*step))
+  }
+  bins <- c(as.numeric(bins),max)
+  #lab <- c(lab,as.character(max))
+  return(list(bins,lab))
+}
+
+
+
+#### Function tests ####
+
+unlist(makeBins(tube_b))
+
+
+
