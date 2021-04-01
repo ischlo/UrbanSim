@@ -31,7 +31,9 @@ qtm(tube)
 
 #### Creating graph and spatil lines from tube ####
 
-tube_graph <- tube %>% as(.,"Spatial")  %>% SpatialLinesNetwork() %>% .@g
+tube_graph <- tube %>% as(.,"Spatial")  %>% SpatialLinesNetwork() %>% .@g %>% simplify(.,remove.multiple = F,remove.loops = T)
+
+simpli(tube_graph)
 
 tube_sl <- tube %>% as(.,"Spatial")  %>% SpatialLinesNetwork() %>% .@sl %>% st_as_sf()
 
@@ -61,23 +63,29 @@ Stations <-  Stations %>%
   st_as_sf(coords = c('X', 'Y')) %>%
   st_set_crs(projection)
 
-Stations$b <- tube_b
+tube_statcoords <-  tube_sl %>% st_coordinates() %>% as_tibble() %>% 
+  rename(edgeID = L1) %>%
+  mutate(start_end = rep(c('start', 'end'), times = n()/2))
+
 
 qtm(Stations)
 
 qtm(tube)
 
-l <- leaflet(Stations) %>% addTiles() %>% addCircleMarkers(.,radius = 3, popup = ~name,color = "red", group = "Stations")
-l
-
 #### Centrality measures  ####
 
+# edge betweenness
 tube_eb <- edge_betweenness(tube_graph, directed = F, weights = tube_sl$length)
 
-tube_eb
+tube_sl$eb <- tube_eb
 
+#betweenness
 
 tube_b <- betweenness(tube_graph, directed = F, weights = tube_sl$length, normalized = T)
+
+Stations$b <- tube_b
+
+# node degree
 
 tube_deg <- degree(tube_graph,mode = "all", loops = F, normalized = F)
 
@@ -85,15 +93,18 @@ tube_degdistr <- degree.distribution(tube_graph,cumulative = F)
 
 hist(tube_deg)
 
-tube_sl$eb <- tube_eb
-
 qtm(tube_sl)
+
+tube_trans <- transitivity(tube_graph, type = "local", isolates = "zero")
+
+hist(tube_trans)
+
+Stations$trans <- tube_trans
+
+avTrans <- transitivity(tube_graph)
 
 #### Mapping #### 
 
-tube_statcoords <-  tube_sl %>% st_coordinates() %>% as_tibble() %>% 
-  rename(edgeID = L1) %>%
-  mutate(start_end = rep(c('start', 'end'), times = n()/2))
 
 # 
 # testl <- leaflet() %>% addTiles()
@@ -104,6 +115,18 @@ tube_statcoords <-  tube_sl %>% st_coordinates() %>% as_tibble() %>%
 # testl
 
 hist(tube_b)
+
+# Thanks for the following procedure to https://stackoverflow.com/questions/32940617/change-color-of-leaflet-marker 
+
+Stations$translvl <- cut(Stations$trans
+                         ,breaks = unlist(makeBins(Stations$trans,4)[1])
+                         ,labels = unlist(makeBins(Stations$trans,4)[2]) 
+                         ,right = F
+                         ,include.lowest = T
+                         ,dig.lab = 2
+)
+
+transCol <- colorFactor(palette = 'viridis', Stations$translvl)
 
 Stations$lvl <- cut(Stations$b
             ,breaks = unlist(makeBins(Stations$b)[1])
@@ -135,10 +158,15 @@ l <- leaflet(Stations) %>%
                    ,opacity = 1
                    ,color = beatCol(Stations$lvl)
                    ,group = "Stations") %>% 
+  addCircleMarkers(radius = 1
+                   ,popup = ~name
+                   ,opacity = 1
+                   ,color = transCol(Stations$translvl)
+                   ,group = "Transitivity") %>% 
   # Layers control
   addLayersControl(
     baseGroups = "OSM",
-    overlayGroups = c("Stations", "Links"),
+    overlayGroups = c("Stations", "Links", "Transitivity"),
     options = layersControlOptions(collapsed = FALSE)
   ) 
 
@@ -157,9 +185,18 @@ for (i in 1:(nrow(tube_statcoords)/2)) {
 
 l <- l %>% addLegend('bottomright', pal = beatCol, values = Stations$lvl,
                      title = 'Betweenness score of <br>tube stations (normalized)',
-                     opacity = 1) %>% addLegend('bottomleft', pal = ebCol, values = tube_sl$lvl,
-                                                title = 'Edge Betweenness score of lines',
-                                                opacity = 1) 
+                     opacity = 1) %>% 
+  addLegend('bottomleft'
+            ,pal = ebCol
+            ,values = tube_sl$lvl
+            ,title = 'Edge Betweenness score of lines'
+            ,opacity = 1) %>% 
+  addLegend('bottomleft'
+            ,pal = transCol
+            ,values = Stations$translvl
+            ,title = paste('Transitivity, average = ',as.character(avTrans)
+                           ,sep = "")
+            ,opacity = 1) 
 
 l
 
